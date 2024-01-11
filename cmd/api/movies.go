@@ -54,7 +54,7 @@ func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Reques
 func (app *application) showMovieHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := app.readIDParam(r)
 	if err != nil {
-		app.logger.Printf("warn: %v\n", err)
+		app.logger.PrintError(fmt.Errorf("warn: %v", err), nil)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
