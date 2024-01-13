@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
-	"net/http"
 	"os"
 	"time"
 
@@ -34,6 +32,11 @@ type config struct {
 		maxIdleConns int
 		maxIdleTime  string
 	}
+	limiter struct {
+		rps     float64
+		burst   int
+		enabled bool
+	}
 }
 
 // Define an application struct to hold the dependencies for our HTTP handlers, helpers,
@@ -60,6 +63,11 @@ func main() {
 	flag.IntVar(&cfg.db.maxIdleConns, "db-max-idle-conns", 25, "PostgreSQL max idle connections")
 	flag.StringVar(&cfg.db.maxIdleTime, "db-max-idle-time", "15m", "PostgreSQL max connection idle time")
 	// GREENLIGHT_DB_DSN="postgres://greenlight:pa55word@localhost/greenlight?sslmode=disable"
+	flag.Float64Var(&cfg.limiter.rps, "limiter-rps", 2, "Rate limiter max requests per second")
+	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate limiter max burst")
+	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enabled rate limiter")
+	flag.Parse()
+
 	// Initialize a new logger which writes messages to the standard out stream,
 	// prefixed with the current date and time.
 	logger := logger.New(os.Stdout, logger.LevelInfo)
@@ -83,24 +91,11 @@ func main() {
 		logger: logger,
 		models: data.NewModels(db),
 	}
-
-	// Declare a HTTP server with some sensible timeout settings, which listens on the
-	// port provided in the config struct and uses the servemux we created above as the handler
-
-	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.port),
-		Handler:           app.routes(),
-		IdleTimeout:       time.Minute,
-		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		ErrorLog:          log.New(logger, "", 0),
+	err = app.serve()
+	if err != nil {
+		logger.PrintFatal(err, nil)
 	}
-	// Start the HTTP server.
-	logger.PrintInfo("starting server", map[string]string{
-		"env":  cfg.env,
-		"addr": srv.Addr})
-	err = srv.ListenAndServe()
-	logger.PrintFatal(err, nil)
+
 }
 
 func openDB(cfg config) (*sql.DB, error) {
