@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"expvar"
 	"flag"
-	"fmt"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,6 +48,9 @@ type config struct {
 		password string
 		sender   string
 	}
+	cors struct {
+		trustedOrigins []string
+	}
 }
 
 // Define an application struct to hold the dependencies for our HTTP handlers, helpers,
@@ -63,7 +68,6 @@ func main() {
 	//Declare instance of the config struct
 	var cfg config
 
-	fmt.Println("Hello World!")
 	// Read the value of the port and env command-line flags into the config struct. We
 	// default to using the port number 4000 and the environment "development" if no
 	// corresponding flags are provided.
@@ -85,6 +89,12 @@ func main() {
 	flag.StringVar(&cfg.smtp.password, "smtp-password", "647bd3cb25ecc0", "SMTP password")
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "Greenlight <no-reply@greeenlight.abhicoding.net>", "SMTP sender")
 
+	// cors origin values
+	flag.Func("cors-trusted-origins", "Trusted CORS origins (space separated)", func(val string) error {
+		cfg.cors.trustedOrigins = strings.Fields(val)
+		return nil
+	})
+
 	flag.Parse()
 	// Initialize a new logger which writes messages to the standard out stream,
 	// prefixed with the current date and time.
@@ -102,6 +112,23 @@ func main() {
 	// Also log a message to say that the connection pool has been successfully
 	// established.
 	logger.PrintInfo("database connection pool established", nil)
+
+	expvar.NewString("version").Set(version)
+
+	// Publish the number of active goroutines
+	expvar.Publish("goroutines", expvar.Func(func() interface{} {
+		return runtime.NumGoroutine()
+	}))
+
+	// Publish the database connection pool statistics
+	expvar.Publish("database", expvar.Func(func() interface{} {
+		return db.Stats()
+	}))
+
+	// Publish the current unix timestamp
+	expvar.Publish("timestamp", expvar.Func(func() interface{} {
+		return time.Now().Unix()
+	}))
 
 	// Declare an instance of application struct, containing the config struct and the logger.
 	app := &application{
