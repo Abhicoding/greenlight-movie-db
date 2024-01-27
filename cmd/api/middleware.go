@@ -4,7 +4,6 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/felixge/httpsnoop"
+	"github.com/tomasen/realip"
 	"golang.org/x/time/rate"
 	"greenlight.abhicoding/internal/data"
 	"greenlight.abhicoding/internal/validator"
@@ -55,12 +55,10 @@ func (app *application) rateLimit(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if app.config.limiter.enabled {
-			ip, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				app.serverErrorResponse(w, r, err)
-				return
-			}
+			ip := realip.FromRequest(r)
+
 			mu.Lock()
+
 			if _, found := clients[ip]; !found {
 				clients[ip] = &client{
 					limiter:  rate.NewLimiter(rate.Limit(app.config.limiter.rps), app.config.limiter.burst),
@@ -105,14 +103,11 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		}
 
 		token := headerParts[1]
-
 		v := validator.New()
-
 		if data.ValidateTokenPlaintext(v, token); !v.Valid() {
 			app.invalidAuthenticationTokenResponse(w, r)
 			return
 		}
-
 		user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token)
 		if err != nil {
 			switch {
@@ -154,7 +149,6 @@ func (app *application) requireActivatedUser(next http.HandlerFunc) http.Handler
 func (app *application) requirePermission(code string, next http.HandlerFunc) http.HandlerFunc {
 	fn := func(w http.ResponseWriter, r *http.Request) {
 		user := app.contextGetUser(r)
-
 		permissions, err := app.models.Permissions.GetAllForUser(user.ID)
 		if err != nil {
 			app.serverErrorResponse(w, r, err)
@@ -181,7 +175,6 @@ func (app *application) enableCORS(next http.Handler) http.Handler {
 		if origin != "" && len(app.config.cors.trustedOrigins) != 0 {
 			for _, value := range app.config.cors.trustedOrigins {
 				if origin == value {
-
 					// To identify pre-flight request
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
@@ -201,7 +194,6 @@ func (app *application) enableCORS(next http.Handler) http.Handler {
 func (app *application) metrics(next http.Handler) http.Handler {
 	totalRequestsReceived := expvar.NewInt("total_requests_received")
 	totalResponsesSent := expvar.NewInt("total_responses_sent")
-
 	totalResponsesSentByStatus := expvar.NewMap("total_responses_sent_by_status")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
