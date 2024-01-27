@@ -1,4 +1,5 @@
 include .envrc
+
 #==========================================================
 # HELPERS
 #==========================================================
@@ -42,6 +43,7 @@ db/migrations/new:
 #=========================================================
 # QUALITY CONTROL
 #=========================================================
+
 ## audit: tidy dependencies and format, vet and test call code
 .PHONY: audit
 audit: vendor
@@ -65,6 +67,7 @@ vendor:
 #========================================================
 # BUILD
 #========================================================
+
 current_time = $(shell date -Iseconds)
 git_description = $(shell git describe --always --dirty --tags --long)
 linker_flags = '-s -X main.buildTime=${current_time} -X main.version=${git_description}'
@@ -75,3 +78,35 @@ build/api:
 	@echo 'Build cmd/api...'
 	go build -a -ldflags=${linker_flags} -o=./bin/api ./cmd/api
 	GOOS=linux GOARCH=amd64 go build -ldflags=${linker_flags} -o=./bin/linux_amd64/api ./cmd/api
+
+#========================================================
+# PRODUCTION
+#========================================================
+
+## production/connect: connect to the production server
+.PHONY: production/connect
+production/connect:
+	ssh greenlight@${PRODUCTION_IP}
+
+## production/deploy/api: deploy the api to production
+.PHONY: production/deploy/api
+production/deploy/api:
+	rsync -rP --delete ./bin/linux_amd64/api ./migrations greenlight@${PRODUCTION_IP}:~
+	ssh -t greenlight@${PRODUCTION_IP} 'migrate -path ~/migrations -database $$GREENLIGHT_DB_DSN up'
+
+## production/configure/api.service: configure the production systemd api.service file
+.PHONY: production/configure/api.service
+production/configure/api.service:
+	rsync -P ./remote/production/api.service greenlight@${PRODUCTION_IP}:~
+	ssh -t greenlight@${PRODUCTION_IP} '\
+		sudo mv ~/api.service /etc/systemd/system/ \
+		&& sudo systemctl enable api \
+		&& sudo systemctl restart api'
+
+## production/configure/caddyfile: configure the production Caddyfile
+.PHONY: production/configure/caddyfile
+production/configure/caddyfile:
+	rsync -P ./remote/production/Caddyfile greenlight@${PRODUCTION_IP}:~
+	ssh -t greenlight@${PRODUCTION_IP} '\
+	sudo mv ~/Caddyfile /etc/caddy/ \
+	&& sudo systemctl reload caddy'
